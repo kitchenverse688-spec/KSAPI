@@ -1,5 +1,5 @@
 
-import { Project, ProjectStatus, ProjectType, City, User, AuditLog, ActivityLog, Company, FilterState } from './types';
+import { Project, ProjectStatus, ProjectType, City, User, AuditLog, ActivityLog, Company, FilterState, PotentialProject } from './types';
 
 // --- MOCK USERS ---
 export const MOCK_USERS: User[] = [
@@ -21,6 +21,57 @@ export const MOCK_ACTIVITY_LOGS: ActivityLog[] = [
   { id: 'act2', timestamp: '2023-10-27T08:05:00Z', type: 'MERGE', message: 'Merged duplicate entry for "Jeddah Tower".', status: 'SUCCESS' },
   { id: 'act3', timestamp: '2023-10-27T07:55:00Z', type: 'ERROR', message: 'Connection timeout for source: tenders.sa', source: 'tenders.sa', status: 'FAILURE' },
   { id: 'act4', timestamp: '2023-10-26T14:30:00Z', type: 'ALERT', message: 'High value alert sent to Slack.', status: 'SUCCESS' },
+];
+
+// --- MOCK CRAWLED DATA FOR STAGING ---
+export const MOCK_POTENTIAL_PROJECTS: PotentialProject[] = [
+  {
+    id: 'temp_1',
+    projectName: 'Qiddiya Water Park Resort',
+    type: ProjectType.RESORT,
+    developer: 'Qiddiya Investment Company',
+    contractor: 'ALEC Engineering',
+    consultant: 'Dewan Architects',
+    city: City.RIYADH,
+    region: 'Riyadh',
+    sourceUrl: 'https://qiddiya.com/news/waterpark-update',
+    sourceTitle: 'Construction begins on Qiddiya Water Park Hotel',
+    publishDate: new Date().toISOString(), // Today
+    summary: 'Major progress on the water park district. Main hotel package awarded to ALEC. The 500-key hotel will feature integrated access to the park.',
+    status: ProjectStatus.ONGOING,
+    estimatedOpening: '2026-01-01',
+    estimatedValue: 2500000000,
+    classification: 'New'
+  },
+  {
+    id: 'temp_2',
+    projectName: 'Jeddah Corniche Tower Hotel', // DUPLICATE SIMULATION
+    type: ProjectType.HOTEL,
+    developer: 'Al Khozama',
+    city: City.JEDDAH,
+    region: 'Makkah',
+    sourceUrl: 'https://sauditenders.sa/jeddah-tower-mep',
+    sourceTitle: 'MEP Tender Issued for Corniche Tower',
+    publishDate: new Date().toISOString(),
+    summary: 'Tenders have been officially issued for the MEP package of the Corniche Tower. Kitchen fit-out is included in the package.',
+    status: ProjectStatus.TENDER,
+    classification: 'New',
+    isDuplicate: true // Flagged for merge
+  },
+  {
+    id: 'temp_3',
+    projectName: 'Abha Luxury Mountain Retreat',
+    type: ProjectType.RESORT,
+    developer: 'Soudah Development',
+    city: City.ABHA,
+    region: 'Asir',
+    sourceUrl: 'https://archive.news/abha-project-stalled',
+    sourceTitle: 'Soudah Peaks Masterplan Revealed',
+    publishDate: '2022-11-15', // Old Date
+    summary: 'Soudah Development launches the masterplan for the highest peak in Saudi Arabia. Includes 2,700 hospitality keys.',
+    status: ProjectStatus.TENDER,
+    classification: 'Backlog'
+  }
 ];
 
 // --- MOCK COMPANIES ---

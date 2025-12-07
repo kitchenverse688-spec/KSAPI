@@ -144,6 +144,29 @@ export interface Project {
   attachments?: Attachment[];
 }
 
+// --- CRAWLER & STAGING TYPES ---
+
+export interface PotentialProject {
+  id: string; // Temporary ID for staging
+  projectName: string;
+  type: ProjectType;
+  developer: string;
+  consultant?: string;
+  contractor?: string;
+  city: City;
+  region: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  publishDate: string;
+  summary: string;
+  status: ProjectStatus;
+  estimatedOpening?: string;
+  estimatedValue?: number;
+  classification: 'New' | 'Backlog' | 'Review';
+  isDuplicate?: boolean;
+  existingProjectId?: string; // If duplicate, link to real DB ID
+}
+
 export interface KPIStats {
   totalProjects: number;
   totalValue: number;
@@ -228,7 +251,21 @@ export interface ScrapedSourceResult {
   url: string;
   title: string;
   score: number;
-  status: 'TRUSTED' | 'PENDING' | 'REJECTED';
+  status: 'NEW' | 'BACKLOG' | 'REVIEW'; // Updated for Fresh/Backlog logic
   reason?: string;
   dateDiscovered: string;
+  aiExtractedData?: {
+    projectName?: string;
+    estimatedValue?: string;
+    developer?: string;
+    status?: string;
+    city?: string;
+  };
+}
+
+export interface CrawledPageLog {
+  url: string;
+  timestamp: string;
+  status: number; // HTTP Status
+  durationMs: number;
 }

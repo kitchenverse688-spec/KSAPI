@@ -58,7 +58,10 @@ import {
   Smartphone,
   Copy,
   Zap,
-  Server
+  Server,
+  FileJson,
+  Network,
+  ListPlus
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -72,8 +75,8 @@ import {
   Pie, 
   Cell 
 } from 'recharts';
-import { MOCK_PROJECTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_ACTIVITY_LOGS, MOCK_COMPANIES, FORMAT_CURRENCY, FORMAT_DATE, TRANSLATIONS, DOWNLOAD_CSV, DOWNLOAD_PDF, DOWNLOAD_DASHBOARD_REPORT, parseAIQuery } from './constants';
-import { Project, ProjectStatus, ProjectType, City, FilterState, SavedSearch, Language, SearchQuery, ScrapingSettings, User, Role, AlertConfig, AuditLog, Company, ScrapedSourceResult } from './types';
+import { MOCK_PROJECTS, MOCK_USERS, MOCK_AUDIT_LOGS, MOCK_ACTIVITY_LOGS, MOCK_COMPANIES, FORMAT_CURRENCY, FORMAT_DATE, TRANSLATIONS, DOWNLOAD_CSV, DOWNLOAD_PDF, parseAIQuery, MOCK_POTENTIAL_PROJECTS, DOWNLOAD_DASHBOARD_REPORT } from './constants';
+import { Project, ProjectStatus, ProjectType, City, FilterState, SavedSearch, Language, SearchQuery, ScrapingSettings, User, Role, AlertConfig, AuditLog, Company, ScrapedSourceResult, CrawledPageLog, PotentialProject } from './types';
 
 // --- LANGUAGE CONTEXT ---
 
@@ -395,1159 +398,224 @@ const Layout = ({ children }: { children?: React.ReactNode }) => {
   );
 };
 
-// --- VIEWS ---
+// --- CRAWLER CONFIGURATION ---
 
-const Dashboard = () => {
-  const { projects } = useProjects();
-  const { t, lang } = useLanguage();
-  
-  // KPI Calculations using Expected Kitchen & Laundry Value where relevant
-  const totalKLValue = projects.reduce((acc, p) => acc + (p.expectedKLScopeValue || 0), 0);
-  const activeProjects = projects.filter(p => p.status === ProjectStatus.ONGOING || p.status === ProjectStatus.TENDER).length;
-  const newToday = projects.filter(p => new Date(p.lastUpdated).toDateString() === new Date().toDateString()).length;
-  const recentAwards = projects.filter(p => p.status === ProjectStatus.AWARDED).slice(0, 5);
-  
-  // Consolidated News Feed from all projects
-  const allNews = useMemo(() => {
-    return projects
-      .flatMap(p => p.news.map(n => ({ ...n, projectName: p.name })))
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 10);
-  }, [projects]);
+const StagingReviewModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+  const { projects, addProject, updateProject } = useProjects();
+  const [stagedProjects, setStagedProjects] = useState<PotentialProject[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const cityData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    projects.forEach(p => { counts[p.city] = (counts[p.city] || 0) + 1; });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [projects]);
-
-  const valueByTypeData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    // Summing Expected K&L Value instead of total project value
-    projects.forEach(p => { counts[p.type] = (counts[p.type] || 0) + (p.expectedKLScopeValue || 0); });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [projects]);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-slate-900">{t('dashboard')}</h1>
-        <button 
-          onClick={DOWNLOAD_DASHBOARD_REPORT}
-          className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-medium flex items-center shadow-sm"
-        >
-          <Download size={16} className="mr-2" /> {t('downloadReport')}
-        </button>
-      </div>
-      
-      {/* KPI Tiles */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          { label: t('newToday'), value: newToday, icon: Clock, color: 'bg-blue-50 text-blue-700' },
-          { label: 'High Value K&L Opps', value: projects.filter(p => (p.expectedKLScopeValue || 0) > 5000000).length, icon: CreditCard, color: 'bg-indigo-50 text-indigo-700' },
-          { label: t('activePipeline'), value: FORMAT_CURRENCY(totalKLValue, lang), icon: Activity, color: 'bg-emerald-50 text-emerald-700' },
-          { label: 'Recent Awards', value: recentAwards.length, icon: Sparkles, color: 'bg-amber-50 text-amber-700' },
-        ].map((kpi, idx) => (
-          <div key={idx} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-500">{kpi.label}</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{kpi.value}</p>
-            </div>
-            <div className={`p-3 rounded-lg ${kpi.color}`}>
-              <kpi.icon size={24} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Charts Area */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-800 mb-6">Pipeline Value by Type (K&L Budget)</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={valueByTypeData} layout="vertical" margin={{ left: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                  <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={100} />
-                  <Tooltip formatter={(value: number) => FORMAT_CURRENCY(value, lang)} />
-                  <Bar dataKey="value" fill="#006C35" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-800 mb-6">Projects by City</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={cityData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                  <YAxis axisLine={false} tickLine={false} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#C8A355" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* News Feed Sidebar */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-           <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center">
-             <MessageSquare size={18} className="mr-2 text-slate-500" /> {t('newsFeed')}
-           </h3>
-           <div className="flex-1 overflow-y-auto pr-2 space-y-4 max-h-[600px]">
-             {allNews.length > 0 ? allNews.map((news, idx) => (
-               <div key={idx} className="border-b border-slate-50 pb-4 last:border-0 last:pb-0 group">
-                  <div className="flex justify-between items-start mb-1">
-                     <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded uppercase">{news.source}</span>
-                     <span className="text-xs text-slate-400">{FORMAT_DATE(news.date, lang)}</span>
-                  </div>
-                  <h4 className="text-sm font-semibold text-slate-800 group-hover:text-ksa-green transition-colors cursor-pointer line-clamp-2">{news.title}</h4>
-                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{news.snippet}</p>
-                  <div className="text-[10px] text-slate-400 mt-1 font-medium bg-slate-50 inline-block px-1 rounded truncate max-w-full">
-                    Project: {news.projectName}
-                  </div>
-               </div>
-             )) : (
-               <div className="text-center text-slate-400 text-sm py-10">No recent market news found.</div>
-             )}
-           </div>
-           <button className="mt-4 w-full py-2 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50">View All News</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const NewProjectModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
-  const { addProject } = useProjects();
-  const [formData, setFormData] = useState<Partial<Project>>({
-    name: '',
-    city: City.RIYADH,
-    type: ProjectType.HOTEL,
-    status: ProjectStatus.TENDER,
-    developer: '',
-    estimatedValueSAR: 0
-  });
+  // In a real app, this would come from a global store or be passed down
+  // Here we load the MOCK_POTENTIAL_PROJECTS when opened to simulate "found" items
+  useEffect(() => {
+    if (isOpen) {
+      // Simulate checking for duplicates against current projects
+      const processed = MOCK_POTENTIAL_PROJECTS.map(staged => {
+        const existing = projects.find(p => 
+          p.name === staged.projectName || 
+          (p.city === staged.city && p.developer === staged.developer)
+        );
+        
+        return {
+          ...staged,
+          isDuplicate: !!existing,
+          existingProjectId: existing?.id
+        };
+      });
+      setStagedProjects(processed);
+    }
+  }, [isOpen, projects]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newProject: Project = {
-      ...formData as Project,
-      id: `man-${Date.now()}`,
-      confidenceScore: 1.0,
-      lastUpdated: new Date().toISOString(),
-      tags: ['Manual Entry'],
-      news: [],
-      history: [],
-      description: formData.description || 'Manually added project.'
-    };
-    addProject(newProject);
+  const handleToggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const handleImport = () => {
+    const toImport = stagedProjects.filter(p => selectedIds.has(p.id));
+    
+    toImport.forEach(staged => {
+      if (staged.isDuplicate && staged.existingProjectId) {
+        // UPDATE Logic
+        const existing = projects.find(p => p.id === staged.existingProjectId);
+        if (existing) {
+          const updated: Project = {
+            ...existing,
+            // Only update fields that are likely to change or improve
+            status: staged.status,
+            contractor: staged.contractor || existing.contractor,
+            consultant: staged.consultant || existing.consultant,
+            lastUpdated: new Date().toISOString(),
+            news: [
+              ...existing.news, 
+              {
+                id: `n-${Date.now()}`,
+                title: staged.sourceTitle,
+                source: 'Hybrid Crawler',
+                date: staged.publishDate,
+                snippet: staged.summary,
+                url: staged.sourceUrl,
+                confidenceScore: 1.0
+              }
+            ],
+            history: [
+              ...(existing.history || []),
+              {
+                date: new Date().toISOString(),
+                field: 'Status/Details',
+                oldValue: existing.status,
+                newValue: staged.status,
+                user: 'Crawler Bot'
+              }
+            ]
+          };
+          updateProject(updated);
+        }
+      } else {
+        // CREATE Logic
+        const newProject: Project = {
+          id: `crawled-${Date.now()}-${Math.random()}`,
+          name: staged.projectName,
+          type: staged.type,
+          city: staged.city,
+          region: staged.region,
+          developer: staged.developer,
+          contractor: staged.contractor,
+          consultant: staged.consultant,
+          status: staged.status,
+          estimatedValueSAR: staged.estimatedValue || 0,
+          expectedCompletion: staged.estimatedOpening || '',
+          confidenceScore: 0.85,
+          tags: [staged.classification, 'Crawled'],
+          lastUpdated: new Date().toISOString(),
+          news: [{
+            id: `n-${Date.now()}`,
+            title: staged.sourceTitle,
+            source: 'Hybrid Crawler',
+            date: staged.publishDate,
+            snippet: staged.summary,
+            url: staged.sourceUrl,
+            confidenceScore: 1.0
+          }],
+          description: staged.summary,
+          history: []
+        };
+        addProject(newProject);
+      }
+    });
+
+    alert(`Successfully processed ${toImport.length} projects.`);
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h3 className="text-xl font-bold mb-4">Add Manual Project</h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Project Name</label>
-            <input required type="text" className="w-full p-2 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-             <div>
-               <label className="block text-sm font-medium mb-1">City</label>
-               <select className="w-full p-2 border rounded" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value as any})}>
-                 {Object.values(City).map(c => <option key={c} value={c}>{c}</option>)}
-               </select>
-             </div>
-             <div>
-               <label className="block text-sm font-medium mb-1">Type</label>
-               <select className="w-full p-2 border rounded" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}>
-                 {Object.values(ProjectType).map(t => <option key={t} value={t}>{t}</option>)}
-               </select>
-             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-             <div>
-               <label className="block text-sm font-medium mb-1">Developer</label>
-               <input type="text" className="w-full p-2 border rounded" value={formData.developer} onChange={e => setFormData({...formData, developer: e.target.value})} />
-             </div>
-             <div>
-               <label className="block text-sm font-medium mb-1">Value (SAR)</label>
-               <input type="number" className="w-full p-2 border rounded" value={formData.estimatedValueSAR} onChange={e => setFormData({...formData, estimatedValueSAR: Number(e.target.value)})} />
-             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea className="w-full p-2 border rounded h-24" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
-          </div>
-          <div className="flex justify-end space-x-2 pt-4">
-            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 rounded text-slate-700">Cancel</button>
-            <button type="submit" className="px-4 py-2 bg-ksa-green text-white rounded">Add Project</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-const ProjectsList = () => {
-  const navigate = useNavigate();
-  const { projects, addProject } = useProjects();
-  const { t, lang } = useLanguage();
-  const [viewMode, setViewMode] = useState<'table' | 'gantt'>('table');
-  const [filter, setFilter] = useState<FilterState>({ search: '', city: 'All', status: 'All', type: 'All', year: 'All' });
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    id: true, name: true, city: true, value: true, klValue: true, awarded: true, developer: true, scope: true, updated: true, actions: true
-  });
-  const [showColMenu, setShowColMenu] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [isAiProcessing, setIsAiProcessing] = useState(false);
-  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
-
-  const handleAiSearch = () => {
-    if (!aiQuery) return;
-    setIsAiProcessing(true);
-    setTimeout(() => {
-      const parsedFilters = parseAIQuery(aiQuery);
-      setFilter(prev => ({
-        ...prev,
-        ...parsedFilters,
-        city: parsedFilters.city || 'All',
-        status: parsedFilters.status || 'All',
-        type: parsedFilters.type || 'All',
-        year: parsedFilters.year || 'All'
-      }));
-      setIsAiProcessing(false);
-    }, 800);
+  const exportCSV = () => {
+    DOWNLOAD_CSV(stagedProjects, 'Crawler_Staged_Results');
   };
 
-  const filteredProjects = useMemo(() => {
-    return projects.filter(p => {
-      const matchSearch = p.name.toLowerCase().includes(filter.search.toLowerCase()) || p.developer.toLowerCase().includes(filter.search.toLowerCase());
-      const matchCity = filter.city === 'All' || p.city === filter.city;
-      const matchStatus = filter.status === 'All' || p.status === filter.status;
-      const matchType = filter.type === 'All' || p.type === filter.type;
-      
-      let matchYear = true;
-      if (filter.year !== 'All') {
-        const year = p.awardDate ? new Date(p.awardDate).getFullYear().toString() : '';
-        matchYear = year === filter.year;
-      }
-
-      return matchSearch && matchCity && matchStatus && matchType && matchYear;
-    });
-  }, [projects, filter]);
-
-  // Gantt Chart Renderer
-  const GanttView = () => {
-    return (
-      <div className="overflow-x-auto bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h3 className="font-bold text-lg mb-4">Project Timeline (Awarded &gt; Completion) </h3>
-        <div className="min-w-[800px] space-y-4">
-          <div className="flex border-b border-slate-200 pb-2">
-            <div className="w-64 font-medium text-slate-500 text-sm">Project</div>
-            <div className="flex-1 flex justify-between text-xs text-slate-400">
-               <span>2023</span><span>2024</span><span>2025</span><span>2026</span><span>2027</span>
-            </div>
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-6xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
+          <div className="flex items-center space-x-3">
+             <div className="bg-emerald-500/20 p-2 rounded">
+               <Database size={20} className="text-emerald-400"/>
+             </div>
+             <div>
+               <h3 className="font-bold text-lg">Data Staging & Review</h3>
+               <p className="text-xs text-slate-400">Review crawled data before importing to master database</p>
+             </div>
           </div>
-          {filteredProjects.slice(0, 10).map(p => {
-             const startYear = p.awardDate ? new Date(p.awardDate).getFullYear() : 2023;
-             const endYear = new Date(p.expectedCompletion).getFullYear();
-             const duration = Math.max(1, endYear - startYear);
-             const offset = Math.max(0, startYear - 2023);
-             const width = (duration / 5) * 100;
-             const left = (offset / 5) * 100;
+          <button onClick={onClose}><X size={20}/></button>
+        </div>
 
-             return (
-               <div key={p.id} className="flex items-center group cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)}>
-                 <div className="w-64 truncate text-sm font-medium text-slate-700 pr-4">{lang === 'ar' ? (p.name_ar || p.name) : p.name}</div>
-                 <div className="flex-1 h-6 bg-slate-50 rounded-full relative overflow-hidden">
-                    <div 
-                      className={`absolute top-0 bottom-0 rounded-full ${p.status === 'Awarded' ? 'bg-emerald-500' : 'bg-blue-500'} opacity-80`}
-                      style={{ left: `${left}%`, width: `${width}%` }}
-                    ></div>
+        <div className="flex-1 overflow-auto bg-slate-50 p-6">
+           <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+              <div className="flex justify-between p-4 border-b border-slate-100 bg-slate-50/50">
+                 <div className="flex space-x-2">
+                   <button onClick={() => setSelectedIds(new Set(stagedProjects.map(p => p.id)))} className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded hover:bg-slate-50">Select All</button>
+                   <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded hover:bg-slate-50">Deselect All</button>
                  </div>
-               </div>
-             )
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="space-y-6 flex flex-col h-full">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-slate-900">{t('projects')}</h1>
-        <div className="flex space-x-2">
-          <button 
-            onClick={() => setIsNewProjectModalOpen(true)}
-            className="px-3 py-2 bg-ksa-green text-white rounded-lg text-sm font-medium flex items-center hover:bg-green-800"
-          >
-            <Plus size={16} className="mr-2"/> Add Project
-          </button>
-           <div className="relative">
-             <button 
-               onClick={() => setShowColMenu(!showColMenu)}
-               className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50 flex items-center"
-             >
-               <Eye size={16} className="mr-2"/> Columns
-             </button>
-             {showColMenu && (
-               <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-slate-200 z-50 p-2">
-                 {Object.keys(visibleColumns).map(col => (
-                   <label key={col} className="flex items-center px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer text-sm">
-                     <input 
-                       type="checkbox" 
-                       checked={visibleColumns[col]} 
-                       onChange={() => setVisibleColumns({...visibleColumns, [col]: !visibleColumns[col]})}
-                       className="mr-2"
-                     />
-                     <span className="capitalize">{col}</span>
-                   </label>
-                 ))}
-               </div>
-             )}
-           </div>
-           <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200">
-             <button onClick={() => setViewMode('table')} className={`px-3 py-1 text-sm rounded-md ${viewMode === 'table' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Table</button>
-             <button onClick={() => setViewMode('gantt')} className={`px-3 py-1 text-sm rounded-md ${viewMode === 'gantt' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Gantt</button>
-           </div>
-        </div>
-      </div>
-
-      {/* AI Search Bar */}
-      <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6 rounded-xl text-white shadow-lg">
-        <h3 className="text-lg font-bold mb-3 flex items-center text-amber-400">
-           <Sparkles size={20} className="mr-2" /> {t('deepSearch')}
-        </h3>
-        <div className="flex space-x-2">
-           <input 
-             type="text" 
-             value={aiQuery}
-             onChange={(e) => setAiQuery(e.target.value)}
-             placeholder={t('deepSearchPlaceholder')}
-             className="flex-1 px-4 py-3 rounded-lg text-slate-900 focus:outline-none"
-             onKeyDown={(e) => e.key === 'Enter' && handleAiSearch()}
-           />
-           <button 
-             onClick={handleAiSearch}
-             className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg transition-colors flex items-center"
-           >
-             {isAiProcessing ? 'Thinking...' : 'Ask AI'}
-           </button>
-        </div>
-        {filter.city !== 'All' || filter.type !== 'All' || filter.status !== 'All' ? (
-           <div className="mt-3 flex items-center space-x-2 text-sm text-slate-300">
-             <span>Active AI Filters:</span>
-             {filter.city !== 'All' && <span className="bg-slate-700 px-2 py-1 rounded">{filter.city}</span>}
-             {filter.type !== 'All' && <span className="bg-slate-700 px-2 py-1 rounded">{filter.type}</span>}
-             {filter.status !== 'All' && <span className="bg-slate-700 px-2 py-1 rounded">{filter.status}</span>}
-             {filter.year !== 'All' && <span className="bg-slate-700 px-2 py-1 rounded">{filter.year}</span>}
-             <button onClick={() => { setFilter({ search: '', city: 'All', status: 'All', type: 'All', year: 'All' }); setAiQuery(''); }} className="text-amber-400 underline ml-2">Clear</button>
-           </div>
-        ) : null}
-      </div>
-
-      {viewMode === 'gantt' ? <GanttView /> : (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex-1">
-          <table className="w-full text-left rtl:text-right border-collapse">
-            <thead className="bg-slate-50">
-              <tr>
-                {visibleColumns.id && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">ID</th>}
-                {visibleColumns.name && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Project</th>}
-                {visibleColumns.city && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">{t('city')}</th>}
-                {visibleColumns.value && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">{t('value')}</th>}
-                {visibleColumns.klValue && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase bg-emerald-50 text-emerald-700">{t('klValue')}</th>}
-                {visibleColumns.awarded && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">{t('awarded')}</th>}
-                {visibleColumns.developer && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">{t('developer')}</th>}
-                {visibleColumns.scope && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">{t('scope')}</th>}
-                {visibleColumns.updated && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Updated</th>}
-                {visibleColumns.actions && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">{t('actions')}</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredProjects.map(p => (
-                <tr key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)}>
-                   {visibleColumns.id && <td className="px-6 py-4 text-xs text-slate-400">#{p.id}</td>}
-                   {visibleColumns.name && <td className="px-6 py-4 font-semibold text-slate-900">{lang === 'ar' ? (p.name_ar || p.name) : p.name}</td>}
-                   {visibleColumns.city && <td className="px-6 py-4 text-sm">{p.city}</td>}
-                   {visibleColumns.value && <td className="px-6 py-4 text-sm font-mono">{FORMAT_CURRENCY(p.estimatedValueSAR, lang)}</td>}
-                   {visibleColumns.klValue && <td className="px-6 py-4 text-sm font-mono font-bold text-emerald-700 bg-emerald-50/30">{FORMAT_CURRENCY(p.expectedKLScopeValue || 0, lang)}</td>}
-                   {visibleColumns.awarded && <td className="px-6 py-4 text-sm">{FORMAT_DATE(p.awardDate, lang)}</td>}
-                   {visibleColumns.developer && <td className="px-6 py-4 text-sm">{p.developer}</td>}
-                   {visibleColumns.scope && (
-                     <td className="px-6 py-4">
-                       <div className="flex space-x-1">
-                         {p.kitchenScope && <span className="text-[10px] bg-orange-100 text-orange-800 px-1 rounded">K</span>}
-                         {p.laundryScope && <span className="text-[10px] bg-blue-100 text-blue-800 px-1 rounded">L</span>}
-                       </div>
-                     </td>
-                   )}
-                   {visibleColumns.updated && <td className="px-6 py-4 text-xs text-slate-500">{FORMAT_DATE(p.lastUpdated, lang)}</td>}
-                   {visibleColumns.actions && <td className="px-6 py-4 text-right"><span className="text-blue-600 text-sm font-medium">View</span></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <NewProjectModal isOpen={isNewProjectModalOpen} onClose={() => setIsNewProjectModalOpen(false)} />
-    </div>
-  );
-};
-
-const ProjectDetail = () => {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const { projects, updateProject } = useProjects();
-  const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState<Project | null>(null);
-
-  const project = projects.find(p => p.id === id);
-
-  useEffect(() => {
-    if (project) setFormData(project);
-  }, [project]);
-
-  if (!project || !formData) return <div>Not Found</div>;
-
-  const handleSave = () => {
-    updateProject(formData);
-    setIsEditing(false);
-  };
-
-  const handleChange = (field: keyof Project, value: any) => {
-    setFormData(prev => prev ? ({ ...prev, [field]: value }) : null);
-  };
-
-  return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-10">
-      <div className="flex items-center space-x-2 text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => navigate('/projects')}>
-        <ArrowLeft size={16} /> <span>Back to Projects</span>
-      </div>
-      
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-         <div className="flex justify-between items-start">
-           <div className="flex-1">
-             {isEditing ? (
-               <input 
-                 type="text" 
-                 value={formData.name} 
-                 onChange={e => handleChange('name', e.target.value)}
-                 className="text-3xl font-bold text-slate-900 border-b border-slate-300 focus:outline-none focus:border-ksa-green w-full mb-2"
-               />
-             ) : (
-               <h1 className="text-3xl font-bold text-slate-900">{project.name}</h1>
-             )}
-             <p className="text-slate-500 flex items-center mt-1"><MapIcon size={14} className="mr-1"/> {project.city}</p>
-           </div>
-           <div className="flex space-x-2">
-             {isEditing ? (
-                <>
-                  <button onClick={() => setIsEditing(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button>
-                  <button onClick={handleSave} className="px-4 py-2 bg-ksa-green text-white rounded-lg text-sm font-medium flex items-center">
-                    <Save size={16} className="mr-2"/> Save Changes
-                  </button>
-                </>
-             ) : (
-                <button onClick={() => setIsEditing(true)} className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium flex items-center hover:bg-blue-100">
-                  <Edit2 size={16} className="mr-2"/> Edit Project
-                </button>
-             )}
-             <button onClick={() => DOWNLOAD_PDF(project)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium flex items-center hover:bg-slate-200">
-               <FileText size={16} className="mr-2"/> Brief
-             </button>
-           </div>
-         </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-             <h3 className="font-bold text-lg mb-4">Description</h3>
-             {isEditing ? (
-               <textarea 
-                 value={formData.description} 
-                 onChange={e => handleChange('description', e.target.value)}
-                 className="w-full h-32 p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ksa-green"
-               />
-             ) : (
-               <p className="text-slate-600 leading-relaxed">{project.description}</p>
-             )}
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-             <h3 className="font-bold text-lg mb-4 flex items-center"><Paperclip size={18} className="mr-2"/> Attachments</h3>
-             {project.attachments && project.attachments.length > 0 ? (
-               <div className="grid grid-cols-2 gap-4">
-                 {project.attachments.map(att => (
-                   <div key={att.id} className="flex items-center p-3 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer">
-                      <div className="w-10 h-10 bg-red-50 text-red-600 rounded flex items-center justify-center mr-3">
-                        <FileText size={20} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{att.name}</p>
-                        <p className="text-xs text-slate-500">{att.size} • {att.uploadDate}</p>
-                      </div>
-                   </div>
-                 ))}
-               </div>
-             ) : (
-               <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-lg">
-                 <p className="text-slate-400 text-sm">No attachments uploaded yet.</p>
-                 <button className="mt-2 text-blue-600 text-sm font-medium">Upload File</button>
-               </div>
-             )}
-          </div>
-        </div>
-        
-        <div className="space-y-6">
-           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-             <h3 className="font-bold mb-4">Details</h3>
-             <div className="space-y-3 text-sm">
-               <div className="flex justify-between items-center">
-                 <span className="text-slate-500">Status</span>
-                 {isEditing ? (
-                   <select 
-                     value={formData.status} 
-                     onChange={e => handleChange('status', e.target.value)}
-                     className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm"
-                   >
-                     {Object.values(ProjectStatus).map(s => <option key={s} value={s}>{s}</option>)}
-                   </select>
-                 ) : (
-                   <span className="font-medium bg-slate-100 px-2 rounded">{project.status}</span>
-                 )}
-               </div>
-               <div className="flex justify-between items-center">
-                 <span className="text-slate-500">Value (SAR)</span>
-                 {isEditing ? (
-                   <input 
-                     type="number" 
-                     value={formData.estimatedValueSAR} 
-                     onChange={e => handleChange('estimatedValueSAR', Number(e.target.value))}
-                     className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm w-32 text-right"
-                   />
-                 ) : (
-                   <span className="font-medium font-mono">{FORMAT_CURRENCY(project.estimatedValueSAR)}</span>
-                 )}
-               </div>
-               <div className="flex justify-between items-center bg-emerald-50 px-2 py-1 rounded -mx-2">
-                 <span className="text-emerald-700 font-bold">K&L Budget (SAR)</span>
-                 {isEditing ? (
-                   <input 
-                     type="number" 
-                     value={formData.expectedKLScopeValue || 0} 
-                     onChange={e => handleChange('expectedKLScopeValue', Number(e.target.value))}
-                     className="bg-white border border-emerald-300 rounded px-2 py-1 text-sm w-32 text-right"
-                   />
-                 ) : (
-                   <span className="font-bold font-mono text-emerald-700">{FORMAT_CURRENCY(project.expectedKLScopeValue || 0)}</span>
-                 )}
-               </div>
-               <div className="flex justify-between items-center">
-                 <span className="text-slate-500">Developer</span>
-                 {isEditing ? (
-                   <input 
-                     type="text" 
-                     value={formData.developer} 
-                     onChange={e => handleChange('developer', e.target.value)}
-                     className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm w-40 text-right"
-                   />
-                 ) : (
-                   <span className="font-medium">{project.developer}</span>
-                 )}
-               </div>
-               <div className="flex justify-between items-center">
-                 <span className="text-slate-500">Contractor</span>
-                 {isEditing ? (
-                   <input 
-                     type="text" 
-                     value={formData.contractor || ''} 
-                     onChange={e => handleChange('contractor', e.target.value)}
-                     className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm w-40 text-right"
-                   />
-                 ) : (
-                   <span className="font-medium">{project.contractor || 'TBD'}</span>
-                 )}
-               </div>
-               <div className="flex justify-between items-center">
-                 <span className="text-slate-500">Expected Completion</span>
-                 {isEditing ? (
-                   <input 
-                     type="date" 
-                     value={formData.expectedCompletion} 
-                     onChange={e => handleChange('expectedCompletion', e.target.value)}
-                     className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm"
-                   />
-                 ) : (
-                   <span className="font-medium">{project.expectedCompletion}</span>
-                 )}
-               </div>
-             </div>
-           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const MapView = () => {
-  const { projects } = useProjects();
-  const { t } = useLanguage();
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markersRef = useRef<any>(null);
-  const tileLayerRef = useRef<any>(null);
-  const [isSatellite, setIsSatellite] = useState(false);
-
-  useEffect(() => {
-    const L = (window as any).L;
-    if (!L || !mapContainerRef.current) return;
-
-    if (!mapRef.current) {
-      mapRef.current = L.map(mapContainerRef.current).setView([24.7136, 46.6753], 5);
-      
-      // Default: OpenStreetMap (Standard)
-      tileLayerRef.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(mapRef.current);
-      
-      // Init Marker Cluster Group
-      if (L.markerClusterGroup) {
-        markersRef.current = L.markerClusterGroup();
-        mapRef.current.addLayer(markersRef.current);
-      }
-    }
-
-    // Toggle Satellite Layer
-    if (tileLayerRef.current) {
-      mapRef.current.removeLayer(tileLayerRef.current);
-    }
-
-    if (isSatellite) {
-      // Esri World Imagery (Satellite)
-      tileLayerRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri'
-      }).addTo(mapRef.current);
-    } else {
-      // OpenStreetMap
-      tileLayerRef.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapRef.current);
-    }
-
-    // Update Markers
-    if (markersRef.current) {
-      markersRef.current.clearLayers();
-      projects.forEach(p => {
-        if (p.coordinates) {
-           const marker = L.marker([p.coordinates.lat, p.coordinates.lng])
-             .bindPopup(`
-               <div class="font-sans">
-                 <h3 class="font-bold text-sm">${p.name}</h3>
-                 <p class="text-xs text-gray-600">${p.city}</p>
-                 <span class="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">${p.status}</span>
-               </div>
-             `);
-           markersRef.current.addLayer(marker);
-        }
-      });
-    }
-
-  }, [projects, isSatellite]);
-
-  return (
-    <div className="h-full flex flex-col">
-       <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-slate-900">{t('map')}</h1>
-          <button 
-             onClick={() => setIsSatellite(!isSatellite)}
-             className="bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center hover:bg-slate-50"
-          >
-             <Layers size={16} className="mr-2"/> {isSatellite ? 'Switch to Standard' : t('mapToggle')}
-          </button>
-       </div>
-       <div className="flex-1 bg-slate-200 rounded-xl border border-slate-300 relative z-0 shadow-inner">
-         <div ref={mapContainerRef} className="absolute inset-0 rounded-xl overflow-hidden"></div>
-         {/* Map Legend Overlay */}
-         <div className="absolute bottom-4 right-4 bg-white p-3 rounded-lg shadow-lg z-[400] text-xs">
-            <div className="font-bold mb-2">Project Clusters</div>
-            <div className="flex items-center space-x-2 mb-1"><span className="w-3 h-3 rounded-full bg-blue-500"></span> <span>Standard Marker</span></div>
-            <div className="flex items-center space-x-2"><span className="w-3 h-3 rounded-full bg-green-500/50 border border-green-600"></span> <span>Cluster</span></div>
-         </div>
-       </div>
-    </div>
-  );
-};
-
-const AdminConsole = () => {
-  const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'users' | 'api' | 'rules' | 'audit'>('users');
-
-  return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-slate-900 flex items-center"><Shield className="mr-2"/> {t('adminConsole')}</h1>
-      
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
-        <div className="flex border-b border-slate-200">
-           {['users', 'api', 'rules', 'audit'].map(tab => (
-             <button 
-               key={tab} 
-               onClick={() => setActiveTab(tab as any)}
-               className={`px-6 py-4 text-sm font-medium capitalize transition-colors ${activeTab === tab ? 'bg-slate-50 text-emerald-600 border-b-2 border-emerald-600' : 'text-slate-500 hover:bg-slate-50'}`}
-             >
-               {tab} Management
-             </button>
-           ))}
-        </div>
-
-        <div className="p-6 bg-slate-50/30 flex-1">
-           {activeTab === 'users' && (
-             <div className="space-y-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-slate-800">System Users</h3>
-                  <button className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm">Add User</button>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                   <table className="w-full text-left text-sm">
-                     <thead className="bg-slate-50 border-b border-slate-200">
-                       <tr><th className="px-4 py-3">Name</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Actions</th></tr>
-                     </thead>
-                     <tbody>
-                       {MOCK_USERS.map(u => (
-                         <tr key={u.id} className="border-b border-slate-100 last:border-0">
-                           <td className="px-4 py-3 font-medium">{u.name}</td>
-                           <td className="px-4 py-3 text-slate-500">{u.email}</td>
-                           <td className="px-4 py-3"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{u.role}</span></td>
-                           <td className="px-4 py-3"><button className="text-blue-600 hover:underline">Edit</button></td>
-                         </tr>
-                       ))}
-                     </tbody>
-                   </table>
-                </div>
-             </div>
-           )}
-
-           {activeTab === 'api' && (
-             <div className="space-y-6 max-w-2xl">
-                <div className="bg-white p-6 rounded-lg border border-slate-200">
-                  <h3 className="font-bold text-slate-800 mb-2">API Keys</h3>
-                  <p className="text-sm text-slate-500 mb-4">Manage access keys for third-party integrations.</p>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded">
-                      <div>
-                        <p className="font-mono text-sm font-bold">pk_live_51M...</p>
-                        <p className="text-xs text-slate-400">Created Oct 2023</p>
-                      </div>
-                      <button className="text-red-500 text-xs font-bold border border-red-200 px-2 py-1 rounded hover:bg-red-50">Revoke</button>
-                    </div>
-                    <button className="w-full py-2 border border-dashed border-slate-300 rounded text-slate-500 hover:bg-slate-50 text-sm">Generate New Key</button>
-                  </div>
-                </div>
-             </div>
-           )}
-
-           {activeTab === 'audit' && (
-             <div className="space-y-4">
-                <h3 className="font-bold text-slate-800 mb-2">System Audit Logs</h3>
-                <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                   <table className="w-full text-left text-sm">
-                     <thead className="bg-slate-50 border-b border-slate-200">
-                       <tr><th className="px-4 py-3">Time</th><th className="px-4 py-3">User</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Details</th></tr>
-                     </thead>
-                     <tbody>
-                       {MOCK_AUDIT_LOGS.map(log => (
-                         <tr key={log.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                           <td className="px-4 py-3 text-slate-500 font-mono text-xs">{new Date(log.timestamp).toLocaleString()}</td>
-                           <td className="px-4 py-3 font-medium">{log.user}</td>
-                           <td className="px-4 py-3"><span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">{log.action}</span></td>
-                           <td className="px-4 py-3 text-slate-600">{log.details}</td>
-                         </tr>
-                       ))}
-                     </tbody>
-                   </table>
-                </div>
-             </div>
-           )}
-           
-           {activeTab === 'rules' && (
-             <div className="bg-white p-6 rounded-lg border border-slate-200 text-center py-12">
-               <Layers className="mx-auto h-12 w-12 text-slate-300 mb-3" />
-               <h3 className="text-lg font-medium text-slate-900">Entity Matching Rules</h3>
-               <p className="text-slate-500 max-w-md mx-auto mt-2">Configure NLP rules for auto-merging company names (e.g., 'El Seif' = 'El Seif Engineering').</p>
-               <button className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm">Configure Rules Engine</button>
-             </div>
-           )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const SettingsPage = () => {
-  const { t } = useLanguage();
-  return (
-    <div className="space-y-6 max-w-3xl">
-      <h1 className="text-2xl font-bold text-slate-900">{t('settings')}</h1>
-      
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center"><Slack size={20} className="mr-2"/> Integrations & Alerts</h3>
-        <div className="space-y-6">
-           <div>
-             <label className="block text-sm font-medium text-slate-700 mb-1">Slack Webhook URL</label>
-             <input type="text" placeholder="https://hooks.slack.com/services/..." className="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm" />
-           </div>
-           <div>
-             <label className="block text-sm font-medium text-slate-700 mb-1">Microsoft Teams Webhook URL</label>
-             <input type="text" placeholder="https://outlook.office.com/webhook/..." className="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm" />
-           </div>
-           
-           <div className="pt-4 border-t border-slate-100 space-y-3">
-             <label className="flex items-center space-x-3">
-               <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" defaultChecked />
-               <span className="text-sm text-slate-700"> Alert on new High Value Projects (&gt;100M SAR) </span>
-             </label>
-             <label className="flex items-center space-x-3">
-               <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" defaultChecked />
-               <span className="text-sm text-slate-700">Alert when watched Competitor is mentioned</span>
-             </label>
-           </div>
-        </div>
-        <div className="mt-6 flex justify-end">
-          <button className="px-4 py-2 bg-ksa-green text-white rounded-lg font-medium hover:bg-green-800 text-sm">Save Configuration</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const CompaniesList = () => {
-  const [companies, setCompanies] = useState<Company[]>(MOCK_COMPANIES);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<Partial<Company>>({});
-  const [activeTab, setActiveTab] = useState<'general' | 'contact'>('general');
-
-  const handleEdit = (company: Company) => {
-    setEditingId(company.id);
-    setFormData(JSON.parse(JSON.stringify(company))); // Deep copy
-    setActiveTab('general');
-    setIsModalOpen(true);
-  };
-
-  const handleAdd = () => {
-    setEditingId(null);
-    setFormData({ type: 'Contractor', city: City.RIYADH, contactPerson: { name: '', role: '', mobile: '', email: '' } });
-    setActiveTab('general');
-    setIsModalOpen(true);
-  };
-
-  const handleSave = () => {
-    if (editingId) {
-       setCompanies(prev => prev.map(c => c.id === editingId ? { ...c, ...formData } as Company : c));
-    } else {
-       const newCompany = { ...formData, id: `c${Date.now()}` } as Company;
-       setCompanies(prev => [newCompany, ...prev]);
-    }
-    setIsModalOpen(false);
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm("Are you sure?")) {
-      setCompanies(prev => prev.filter(c => c.id !== id));
-    }
-  }
-
-  const updateContactPerson = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      contactPerson: {
-        ...(prev.contactPerson || { name: '', role: '', mobile: '', email: '' }),
-        [field]: value
-      }
-    }));
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-slate-900">Companies & Contractors</h1>
-        <button onClick={handleAdd} className="bg-ksa-green text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-800 flex items-center">
-           <Plus size={16} className="mr-2"/> Add Company
-        </button>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-left">
-           <thead className="bg-slate-50 border-b border-slate-200">
-             <tr>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Name</th>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Type</th>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">City</th>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Website</th>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Key Contact</th>
-               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Actions</th>
-             </tr>
-           </thead>
-           <tbody className="divide-y divide-slate-100">
-             {companies.map(c => (
-               <tr key={c.id} className="hover:bg-slate-50">
-                 <td className="px-6 py-4 font-medium text-slate-900">{c.name}</td>
-                 <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{c.type}</span></td>
-                 <td className="px-6 py-4 text-sm text-slate-500">{c.city}</td>
-                 <td className="px-6 py-4 text-sm text-blue-600">
-                    {c.website && <a href={c.website} target="_blank" rel="noreferrer" className="flex items-center hover:underline"><LinkIcon size={12} className="mr-1"/> Link</a>}
-                 </td>
-                 <td className="px-6 py-4 text-sm text-slate-600">
-                    {c.contactPerson?.name ? (
-                      <div className="flex flex-col">
-                        <span className="font-medium text-xs">{c.contactPerson.name}</span>
-                        <span className="text-[10px] text-slate-400">{c.contactPerson.mobile}</span>
-                      </div>
-                    ) : <span className="text-slate-300">-</span>}
-                 </td>
-                 <td className="px-6 py-4 text-right space-x-2">
-                   <button onClick={() => handleEdit(c)} className="text-blue-600 hover:text-blue-800"><Edit2 size={16}/></button>
-                   <button onClick={() => handleDelete(c.id)} className="text-red-500 hover:text-red-700"><Trash2 size={16}/></button>
-                 </td>
-               </tr>
-             ))}
-           </tbody>
-        </table>
-      </div>
-
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-           <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-             <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-bold">{editingId ? 'Edit Company' : 'Add Company'}</h3>
-                <div className="flex bg-slate-100 rounded-lg p-1">
-                  <button onClick={() => setActiveTab('general')} className={`px-3 py-1 text-xs font-medium rounded ${activeTab === 'general' ? 'bg-white shadow-sm' : 'text-slate-500'}`}>General</button>
-                  <button onClick={() => setActiveTab('contact')} className={`px-3 py-1 text-xs font-medium rounded ${activeTab === 'contact' ? 'bg-white shadow-sm' : 'text-slate-500'}`}>Contact Details</button>
-                </div>
-             </div>
-             
-             {activeTab === 'general' ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Company Name</label>
-                    <input 
-                      type="text" 
-                      value={formData.name || ''} 
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      className="w-full p-2 border border-slate-300 rounded"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Type</label>
-                      <select 
-                        value={formData.type} 
-                        onChange={e => setFormData({...formData, type: e.target.value as any})}
-                        className="w-full p-2 border border-slate-300 rounded"
-                      >
-                        {['Developer', 'Contractor', 'Designer', 'Consultant'].map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">City</label>
-                      <select 
-                        value={formData.city} 
-                        onChange={e => setFormData({...formData, city: e.target.value as any})}
-                        className="w-full p-2 border border-slate-300 rounded"
-                      >
-                        {Object.values(City).map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Website URL</label>
-                    <input 
-                      type="text" 
-                      value={formData.website || ''} 
-                      onChange={e => setFormData({...formData, website: e.target.value})}
-                      className="w-full p-2 border border-slate-300 rounded"
-                      placeholder="https://..."
-                    />
-                  </div>
-                </div>
-             ) : (
-                <div className="space-y-4">
-                  <div className="border-b border-slate-100 pb-4 mb-4">
-                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center"><Building2 size={14} className="mr-2"/> Corporate Contact</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">General Email</label>
+                 <button onClick={exportCSV} className="flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded hover:bg-blue-100">
+                    <Download size={14} className="mr-1"/> Export JSON/CSV
+                 </button>
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-100 border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 w-10"></th>
+                    <th className="px-4 py-3">Project Name</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Developer</th>
+                    <th className="px-4 py-3">City</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Classification</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {stagedProjects.map(project => (
+                    <tr key={project.id} className={`hover:bg-slate-50 ${project.isDuplicate ? 'bg-amber-50/40' : ''}`}>
+                      <td className="px-4 py-3">
                         <input 
-                          type="email" 
-                          value={formData.email || ''} 
-                          onChange={e => setFormData({...formData, email: e.target.value})}
-                          className="w-full p-2 border border-slate-300 rounded text-sm"
+                          type="checkbox" 
+                          checked={selectedIds.has(project.id)} 
+                          onChange={() => handleToggleSelect(project.id)}
+                          className="rounded text-ksa-green focus:ring-ksa-green"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">General Phone</label>
-                        <input 
-                          type="text" 
-                          value={formData.phone || ''} 
-                          onChange={e => setFormData({...formData, phone: e.target.value})}
-                          className="w-full p-2 border border-slate-300 rounded text-sm"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center"><UserIcon size={14} className="mr-2"/> Key Person Contact</h4>
-                    <div className="space-y-3">
-                       <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Contact Name</label>
-                          <input 
-                            type="text" 
-                            value={formData.contactPerson?.name || ''} 
-                            onChange={e => updateContactPerson('name', e.target.value)}
-                            className="w-full p-2 border border-slate-300 rounded text-sm"
-                          />
-                       </div>
-                       <div className="grid grid-cols-2 gap-4">
-                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Role / Job Title</label>
-                            <input 
-                              type="text" 
-                              value={formData.contactPerson?.role || ''} 
-                              onChange={e => updateContactPerson('role', e.target.value)}
-                              className="w-full p-2 border border-slate-300 rounded text-sm"
-                            />
-                         </div>
-                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mobile Number</label>
-                            <input 
-                              type="text" 
-                              value={formData.contactPerson?.mobile || ''} 
-                              onChange={e => updateContactPerson('mobile', e.target.value)}
-                              className="w-full p-2 border border-slate-300 rounded text-sm"
-                            />
-                         </div>
-                       </div>
-                       <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Direct Email</label>
-                          <input 
-                            type="email" 
-                            value={formData.contactPerson?.email || ''} 
-                            onChange={e => updateContactPerson('email', e.target.value)}
-                            className="w-full p-2 border border-slate-300 rounded text-sm"
-                          />
-                       </div>
-                    </div>
-                  </div>
-                </div>
-             )}
-
-             <div className="flex justify-end space-x-2 pt-6 border-t border-slate-100 mt-6">
-               <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 bg-slate-100 rounded text-slate-700 font-medium">Cancel</button>
-               <button onClick={handleSave} className="px-4 py-2 bg-ksa-green text-white rounded font-medium">Save Details</button>
-             </div>
+                      </td>
+                      <td className="px-4 py-3 font-medium">
+                        {project.projectName}
+                        {project.isDuplicate && <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">DUPLICATE</span>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{project.type}</td>
+                      <td className="px-4 py-3">{project.developer}</td>
+                      <td className="px-4 py-3">{project.city}</td>
+                      <td className="px-4 py-3"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{project.status}</span></td>
+                      <td className="px-4 py-3">
+                         <span className={`px-2 py-1 rounded text-xs font-bold ${
+                           project.classification === 'New' ? 'bg-emerald-100 text-emerald-800' :
+                           project.classification === 'Backlog' ? 'bg-blue-100 text-blue-800' :
+                           'bg-gray-100 text-gray-800'
+                         }`}>
+                           {project.classification}
+                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                         <button className="text-blue-600 hover:text-blue-800 text-xs font-medium">Edit</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {stagedProjects.length === 0 && (
+                    <tr><td colSpan={8} className="p-8 text-center text-slate-500 italic">No projects staged for review. Run the crawler first.</td></tr>
+                  )}
+                </tbody>
+              </table>
            </div>
         </div>
-      )}
+
+        <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center">
+           <div className="text-sm text-slate-500">
+             {selectedIds.size} projects selected for import
+           </div>
+           <div className="flex space-x-3">
+             <button onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+             <button 
+               onClick={handleImport}
+               disabled={selectedIds.size === 0}
+               className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center"
+             >
+               <Check size={16} className="mr-2"/> Import Selected to Database
+             </button>
+           </div>
+        </div>
+      </div>
     </div>
   );
-}
-
-const Pipeline = () => {
-    const { projects, updateProject } = useProjects();
-    const { t, lang } = useLanguage();
-    
-    // Simple statuses for pipeline
-    const statuses = [ProjectStatus.TENDER, ProjectStatus.ONGOING, ProjectStatus.AWARDED, ProjectStatus.LOST];
-
-    const getProjectsByStatus = (status: ProjectStatus) => {
-      return projects.filter(p => p.status === status);
-    };
-
-    const handleStatusChange = (projectId: string, newStatus: ProjectStatus) => {
-       const project = projects.find(p => p.id === projectId);
-       if (project) {
-         updateProject({...project, status: newStatus});
-       }
-    };
-
-    return (
-      <div className="h-full flex flex-col">
-         <h1 className="text-2xl font-bold text-slate-900 mb-6">{t('pipeline')}</h1>
-         <div className="flex-1 overflow-x-auto pb-4">
-            <div className="flex space-x-4 min-w-[1000px] h-full">
-              {statuses.map(status => {
-                const columnProjects = getProjectsByStatus(status);
-                // Summing Expected K&L Value for Pipeline View
-                const totalValue = columnProjects.reduce((acc, p) => acc + (p.expectedKLScopeValue || 0), 0);
-
-                return (
-                  <div key={status} className="w-80 flex flex-col bg-slate-100 rounded-xl p-3 border border-slate-200">
-                    <div className="flex justify-between items-center mb-3 px-2">
-                       <span className="font-bold text-slate-700">{status}</span>
-                       <span className="text-xs bg-slate-200 px-2 py-1 rounded text-slate-600">{columnProjects.length}</span>
-                    </div>
-                    <div className="text-xs text-slate-500 mb-3 px-2 font-mono flex items-center">
-                       <span className="bg-emerald-100 text-emerald-800 px-1 rounded mr-1">K&L</span>
-                       {FORMAT_CURRENCY(totalValue, lang)}
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto space-y-3">
-                       {columnProjects.map(p => (
-                         <div key={p.id} className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 group">
-                            <div className="text-sm font-bold text-slate-800 mb-1">{p.name}</div>
-                            <div className="text-xs text-slate-500 mb-2">{p.developer}</div>
-                            <div className="flex justify-between items-center text-xs text-slate-400">
-                              <span className="text-emerald-600 font-medium">{FORMAT_CURRENCY(p.expectedKLScopeValue || 0, lang)}</span>
-                              <span>{p.salesData?.owner || 'Unassigned'}</span>
-                            </div>
-                            
-                            {/* Quick Actions overlay */}
-                            <div className="mt-3 pt-3 border-t border-slate-50 flex justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-                               <button 
-                                 onClick={() => {
-                                    const currentIndex = statuses.indexOf(status);
-                                    if (currentIndex > 0) handleStatusChange(p.id, statuses[currentIndex - 1]);
-                                 }}
-                                 disabled={statuses.indexOf(status) === 0}
-                                 className="text-xs text-slate-400 hover:text-blue-600 disabled:opacity-30"
-                               >
-                                 &larr; Prev
-                               </button>
-                               <button 
-                                 onClick={() => {
-                                    const currentIndex = statuses.indexOf(status);
-                                    if (currentIndex < statuses.length - 1) handleStatusChange(p.id, statuses[currentIndex + 1]);
-                                 }}
-                                 disabled={statuses.indexOf(status) === statuses.length - 1}
-                                 className="text-xs text-slate-400 hover:text-blue-600 disabled:opacity-30"
-                               >
-                                 Next &rarr;
-                               </button>
-                            </div>
-                         </div>
-                       ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-         </div>
-      </div>
-    );
 };
-
-// --- CRAWLER CONFIGURATION ---
 
 const AddSourceModal = ({ isOpen, onClose, onAdd }: { isOpen: boolean, onClose: () => void, onAdd: (url: string) => void }) => {
   const [url, setUrl] = useState('');
@@ -1638,7 +706,11 @@ const CrawlerConfig = () => {
     const [sources, setSources] = useState(['sauditenders.sa', 'meed.com', 'constructionweekonline.com', 'momrah.gov.sa', 'redseaglobal.com']);
     const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
     const [isQueryBuilderOpen, setIsQueryBuilderOpen] = useState(false);
+    const [isReviewOpen, setIsReviewOpen] = useState(false);
     const [discoveryResults, setDiscoveryResults] = useState<ScrapedSourceResult[]>([]);
+    const [manualUrl, setManualUrl] = useState('');
+    const [visitedPages, setVisitedPages] = useState<CrawledPageLog[]>([]);
+    const [scanMode, setScanMode] = useState<{fresh: boolean, backlog: boolean}>({ fresh: true, backlog: true });
     const terminalEndRef = useRef<HTMLDivElement>(null);
 
     const englishQuery = `("commercial kitchen" OR "kitchen fit-out" OR "central kitchen" OR "laundry equipment") AND (hotel OR hospital OR "central kitchen" OR restaurant OR franchise OR "entertainment city") AND (Riyadh OR Jeddah OR Mecca OR Medina OR Dammam OR Khobar OR Yanbu OR Jazan OR Tabuk OR Abha OR Najran OR Qassim OR "Hafr Al Batin" OR "Khamis Mushait" OR "Al-Ula" OR "Al-Jouf")`;
@@ -1649,60 +721,145 @@ const CrawlerConfig = () => {
       terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [logs]);
 
-    const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
+    const addLog = (msg: string) => {
+       const timestamp = new Date().toLocaleTimeString('en-GB', { hour12: false });
+       setLogs(prev => [...prev, `[${timestamp}] ${msg}`]);
+    };
+
+    const addVisitedPage = (url: string, status: number) => {
+       setVisitedPages(prev => [{ url, timestamp: new Date().toLocaleTimeString(), status, durationMs: Math.floor(Math.random() * 800) + 100 }, ...prev]);
+    }
 
     const runHybridCrawl = () => {
       if (isCrawling) return;
       setIsCrawling(true);
       setLogs([]);
       setDiscoveryResults([]);
+      setManualUrl('');
+      setVisitedPages([]);
 
-      const sequence = [
-        { msg: "[INIT] Starting Hybrid Crawl Protocol v1.0", delay: 100 },
-        { msg: "[STEP 1] Automatic Discovery - Wide Scan initiated...", delay: 800 },
-        { msg: `[SCAN] Keywords: "commercial kitchen", "hotel", "hospital", "laundry"`, delay: 1200 },
-        { msg: "[FILTER] Ignoring general forums, low-quality directories, and spam farms...", delay: 2000 },
-        { msg: "[DISCOVERED] found 'https://hospitality-news-sa.com/2023/awards'", delay: 2500 },
-        { msg: "[SCORE] Relevance Analysis: Keyword Match (High), Domain (Trusted), Author (Verified)", delay: 3500 },
-        { msg: "[SCORE] Calculated Score: 92/100 -> TRUSTED SOURCE", delay: 3600 },
-        { msg: "[DISCOVERED] found 'https://random-blog-xyz.com/post/cheap-kitchens'", delay: 4500 },
-        { msg: "[SCORE] Relevance Analysis: No Author, High Ad Density, Pop-ups detected", delay: 5200 },
-        { msg: "[SCORE] Calculated Score: 25/100 -> REJECTED (Quality Standards)", delay: 5300 },
-        { msg: "[DISCOVERED] found 'https://construction-weekly-update.org/projects/riyadh'", delay: 6200 },
-        { msg: "[SCORE] Relevance Analysis: Content coherent, but Domain Authority Medium", delay: 6900 },
-        { msg: "[SCORE] Score: 72/100 -> PENDING MANUAL REVIEW", delay: 7000 },
-        { msg: "[STEP 5] Generating Final Output Report...", delay: 8000 },
-        { msg: "[COMPLETE] Hybrid Crawl Finished. 3 Sources Processed.", delay: 8500 },
+      const sequence: { msg: string; delay: number; action?: () => void }[] = [
+        { msg: "INIT: Starting Hybrid Project Discovery Protocol v3.0", delay: 100 },
+        { msg: "CONFIG: Setting Scope -> HOSPITALITY ONLY (Hotels, Resorts, Tourism)", delay: 500 },
+        { msg: "CONFIG: Prioritizing High-Trust Domains (PIF, Gov Portals, Press Releases)", delay: 800 },
       ];
 
+      let delayCounter = 1200;
+
+      // FRESH SCAN LOGIC
+      if (scanMode.fresh) {
+        sequence.push(
+            { msg: "MODE START: Fresh Projects Scan (Last 7 Days)", delay: delayCounter },
+            { msg: `QUERY: "hospitality project announced" OR "new hotel project" OR "PIF announcement"`, delay: delayCounter + 800 },
+            { msg: "SCAN: Checking Ministry of Tourism & Invest Saudi portals...", delay: delayCounter + 1500, action: () => addVisitedPage('https://mt.gov.sa/news', 200) },
+            { msg: "FOUND: New Article -> 'Qiddiya Water Park Resort'", delay: delayCounter + 2500 },
+            { msg: "AI EXTRACT: Identified Developer -> 'Qiddiya Investment Co'", delay: delayCounter + 2800 },
+            { msg: "AI EXTRACT: Identified Contractor -> 'ALEC Engineering'", delay: delayCounter + 3000 },
+            { msg: "ANALYZE: Date: Today. Status: Ongoing. Class: NEW", delay: delayCounter + 3200 },
+             // Add result later
+        );
+        delayCounter += 4000;
+      }
+
+      // BACKLOG SCAN LOGIC
+      if (scanMode.backlog) {
+         sequence.push(
+            { msg: "MODE START: Backlog Scan (Last 12-24 Months)", delay: delayCounter },
+            { msg: `QUERY: "project under construction" OR "tender issued hotel"`, delay: delayCounter + 800 },
+            { msg: "SCAN: Crawling Construction Week archives...", delay: delayCounter + 1500, action: () => addVisitedPage('https://constructionweekonline.com/projects', 200) },
+            { msg: "FOUND: Archive Entry -> 'Abha Luxury Mountain Retreat'", delay: delayCounter + 2500 },
+            { msg: "AI EXTRACT: Identified Region -> 'Asir'", delay: delayCounter + 2800 },
+            { msg: "CLASSIFY: Age > 30 days -> BACKLOG", delay: delayCounter + 3200 },
+         );
+         delayCounter += 6000;
+      }
+      
+      sequence.push(
+          { msg: "FINALIZE: Converting unstructured text to JSON...", delay: delayCounter },
+          { msg: "STAGING: 3 Projects ready for review.", delay: delayCounter + 800 },
+          { msg: "COMPLETE: Discovery Cycle Finished.", delay: delayCounter + 1200 }
+      );
+
       let currentTime = 0;
-      sequence.forEach(({ msg, delay }) => {
-        currentTime += delay;
-        setTimeout(() => addLog(msg), currentTime);
+      sequence.forEach((item) => {
+        currentTime = item.delay; 
+        setTimeout(() => {
+          addLog(item.msg);
+          if (item.action) item.action();
+        }, currentTime);
       });
 
+      // Generate Mock Results
       setTimeout(() => {
         setIsCrawling(false);
-        setDiscoveryResults([
-          { url: 'https://hospitality-news-sa.com/2023/awards', title: 'Hospitality News SA', score: 92, status: 'TRUSTED', dateDiscovered: new Date().toISOString() },
-          { url: 'https://construction-weekly-update.org/projects/riyadh', title: 'Construction Weekly Update', score: 72, status: 'PENDING', dateDiscovered: new Date().toISOString() },
-          { url: 'https://random-blog-xyz.com/post/cheap-kitchens', title: 'Random Blog XYZ', score: 25, status: 'REJECTED', reason: 'High Ad Density', dateDiscovered: new Date().toISOString() }
-        ]);
-      }, 9000);
+        // We open the review modal automatically or let user click
+        setIsReviewOpen(true);
+      }, delayCounter + 2000);
+    };
+
+    const runManualCrawl = () => {
+        if (!manualUrl || isCrawling) return;
+        setIsCrawling(true);
+        setLogs([]);
+        setDiscoveryResults([]);
+        setVisitedPages([]);
+
+        const sequence: { msg: string; delay: number; action?: () => void }[] = [
+            { msg: `INIT: Manual Inspection Protocol initiated for target: ${manualUrl}`, delay: 100 },
+            { msg: `CONNECT: Handshaking with ${manualUrl}...`, delay: 800, action: () => addVisitedPage(manualUrl, 200) },
+            { msg: "FETCH: Downloading HTML content (245kb)...", delay: 1500 },
+            { msg: "PARSE: Parsing DOM structure...", delay: 2000 },
+            { msg: "ANALYZE: Checking for project keywords (Kitchen, Laundry, Tender)...", delay: 2800 },
+            { msg: "AI AGENT: Initializing Content Extraction Model...", delay: 3200 },
+            { msg: "AI AGENT: Identified 'Project Name' -> 'Sunset Beach Resort Phase 2'", delay: 3800 },
+            { msg: "AI AGENT: Identified 'Value' -> '350M SAR'", delay: 4000 },
+            { msg: "AI AGENT: Identified 'Developer' -> 'Dur Hospitality'", delay: 4200 },
+            { msg: "AI AGENT: Extraction Confidence: 94%", delay: 4400 },
+            { msg: "NLP: Extracting entities (Developers, Cost, Location)...", delay: 4800 },
+            { msg: "VALIDATE: Checking robots.txt and sitemap compliance...", delay: 5200 },
+            { msg: `COMPLETE: Analysis finished for ${manualUrl}`, delay: 5500 }
+        ];
+
+        let currentTime = 0;
+        sequence.forEach((item) => {
+            currentTime += item.delay;
+            setTimeout(() => {
+              addLog(item.msg);
+              if (item.action) item.action();
+            }, currentTime);
+        });
+        
+        // Result generation
+        setTimeout(() => {
+             setIsCrawling(false);
+             setDiscoveryResults([{
+                 url: manualUrl,
+                 title: 'Manual Inspection Result',
+                 score: 88, 
+                 status: 'REVIEW',
+                 dateDiscovered: new Date().toISOString(),
+                 aiExtractedData: {
+                    projectName: 'Sunset Beach Resort Phase 2',
+                    estimatedValue: '350M SAR',
+                    developer: 'Dur Hospitality',
+                    status: 'Tender'
+                 }
+             }]);
+        }, 5800);
     };
 
     return (
-      <div className="space-y-6 max-w-5xl">
+      <div className="space-y-6 max-w-6xl mx-auto">
         <h1 className="text-2xl font-bold text-slate-900">{t('crawler')} Configuration</h1>
         
         {/* TERMINAL UI */}
-        <div className="bg-slate-900 rounded-xl overflow-hidden shadow-2xl flex flex-col h-80">
+        <div className="bg-slate-900 rounded-xl overflow-hidden shadow-2xl flex flex-col h-80 relative">
            <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center">
              <div className="flex items-center space-x-2">
                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-               <span className="ml-2 text-slate-400 text-sm font-mono">ksa-intel-crawler --hybrid-mode</span>
+               <span className="ml-2 text-slate-400 text-sm font-mono">ksa-intel-crawler --hospitality-mode</span>
              </div>
              <div className="flex items-center space-x-2">
                 <span className={`w-2 h-2 rounded-full ${isCrawling ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`}></span>
@@ -1710,9 +867,9 @@ const CrawlerConfig = () => {
              </div>
            </div>
            <div className="p-6 font-mono text-sm flex-1 overflow-y-auto space-y-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-              {logs.length === 0 && <div className="text-slate-500 italic"> Ready to initiate sequence...</div>}
+              {logs.length === 0 && <div className="text-slate-500 italic"> Ready to initiate hospitality discovery sequence...</div>}
               {logs.map((log, i) => (
-                <div key={i} className={`${log.includes('TRUSTED') ? 'text-emerald-400 font-bold' : log.includes('REJECTED') ? 'text-red-400' : log.includes('PENDING') ? 'text-amber-400' : 'text-slate-300'}`}>
+                <div key={i} className={`${log.includes('NEW') || log.includes('TRUSTED') ? 'text-emerald-400 font-bold' : log.includes('BACKLOG') ? 'text-blue-400' : log.includes('REVIEW') ? 'text-amber-400' : log.includes('AI EXTRACT') ? 'text-cyan-400' : 'text-slate-300'}`}>
                   {log}
                 </div>
               ))}
@@ -1722,9 +879,13 @@ const CrawlerConfig = () => {
 
         {/* CONTROLS GRID */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+           {/* LEFT: SOURCES & VISITED LOG */}
            <div className="bg-white p-6 rounded-xl border border-slate-200 h-full flex flex-col">
-             <h3 className="font-bold text-slate-800 mb-4 flex items-center"><Database size={18} className="mr-2"/> Seed Sources</h3>
-             <ul className="space-y-2 flex-1 overflow-y-auto max-h-48 mb-4">
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-slate-800 flex items-center"><Database size={18} className="mr-2"/> Seed Sources</h3>
+                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded">Target List</span>
+             </div>
+             <ul className="space-y-2 overflow-y-auto max-h-32 mb-4 border-b border-slate-100 pb-4">
                {sources.map(url => (
                  <li key={url} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded border border-slate-100 hover:border-slate-300 transition-colors">
                    <span className="text-slate-600 truncate mr-2">{url}</span>
@@ -1732,58 +893,101 @@ const CrawlerConfig = () => {
                  </li>
                ))}
              </ul>
-             <button 
-               onClick={() => setIsAddSourceOpen(true)}
-               className="flex justify-center items-center text-sm p-2 bg-slate-50 rounded border-2 border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 hover:border-slate-400 font-medium transition-all"
-             >
-               <Plus size={16} className="mr-2"/> Add New Source URL
-             </button>
+             
+             {/* TRAFFIC LOG SECTION */}
+             <div className="flex-1 mt-2">
+                <h4 className="font-bold text-slate-800 text-sm mb-2 flex items-center"><Network size={14} className="mr-2"/> Live Network Traffic</h4>
+                <div className="bg-slate-900 rounded-lg p-3 h-40 overflow-y-auto font-mono text-xs">
+                    {visitedPages.length === 0 && <div className="text-slate-600 text-center py-4">Waiting for traffic...</div>}
+                    {visitedPages.map((page, i) => (
+                        <div key={i} className="flex space-x-2 border-b border-slate-800 pb-1 mb-1 last:border-0">
+                           <span className="text-slate-500">[{page.timestamp}]</span>
+                           <span className={page.status === 200 ? 'text-green-500' : 'text-red-500'}>{page.status}</span>
+                           <span className="text-slate-300 truncate flex-1" title={page.url}>{page.url}</span>
+                           <span className="text-slate-600">{page.durationMs}ms</span>
+                        </div>
+                    ))}
+                </div>
+             </div>
            </div>
 
-           <div className="bg-white p-6 rounded-xl border border-slate-200 h-full flex flex-col justify-center items-center text-center relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-4 opacity-10"><Zap size={100}/></div>
-             <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-4 shadow-sm">
-               <RefreshCw size={32} className={isCrawling ? 'animate-spin' : ''} />
-             </div>
-             <h3 className="font-bold text-slate-800 text-lg mb-1">Crawl Control Center</h3>
-             <p className="text-xs text-slate-500 mb-6 max-w-xs">Run a comprehensive hybrid discovery scan using advanced heuristic relevance scoring.</p>
-             <div className="flex space-x-3 w-full px-4">
-                <button 
-                  onClick={runHybridCrawl} 
-                  disabled={isCrawling}
-                  className="flex-1 py-3 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
-                >
-                  {isCrawling ? 'Scanning...' : 'Run Hybrid Discovery'}
-                </button>
-             </div>
+           {/* RIGHT: ACTIONS & MANUAL INSPECT */}
+           <div className="space-y-4 h-full flex flex-col">
+              {/* HYBRID CRAWL */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 flex-1 flex flex-col justify-center items-center text-center relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-5"><Zap size={80}/></div>
+                
+                <h3 className="font-bold text-slate-800 text-lg mb-2">Hospitality Discovery Mode</h3>
+                
+                <div className="flex space-x-4 mb-4 text-sm text-left w-full px-4">
+                   <label className="flex items-center space-x-2 cursor-pointer bg-slate-50 p-2 rounded border border-slate-200 flex-1">
+                      <input type="checkbox" checked={scanMode.fresh} onChange={() => setScanMode(p => ({...p, fresh: !p.fresh}))} className="rounded text-ksa-green focus:ring-ksa-green" />
+                      <div>
+                         <span className="block font-bold text-slate-800">Fresh Scan</span>
+                         <span className="text-xs text-slate-500">Last 7 days (New)</span>
+                      </div>
+                   </label>
+                   <label className="flex items-center space-x-2 cursor-pointer bg-slate-50 p-2 rounded border border-slate-200 flex-1">
+                      <input type="checkbox" checked={scanMode.backlog} onChange={() => setScanMode(p => ({...p, backlog: !p.backlog}))} className="rounded text-ksa-green focus:ring-ksa-green" />
+                      <div>
+                         <span className="block font-bold text-slate-800">Backlog Scan</span>
+                         <span className="text-xs text-slate-500">Last 1-2 years</span>
+                      </div>
+                   </label>
+                </div>
+
+                <div className="flex space-x-2 w-full">
+                    <button 
+                        onClick={runHybridCrawl} 
+                        disabled={isCrawling || (!scanMode.fresh && !scanMode.backlog)}
+                        className="flex-1 py-3 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center transition-all"
+                    >
+                        {isCrawling ? 'Scanning Network...' : 'Run Hospitality Discovery'}
+                    </button>
+                    <button 
+                       onClick={() => setIsAddSourceOpen(true)}
+                       className="px-4 py-3 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-bold"
+                       title="Add Source"
+                    >
+                       <Plus size={18}/>
+                    </button>
+                </div>
+                
+                {/* NEW: Review Button */}
+                <div className="w-full mt-2 px-4">
+                   <button 
+                     onClick={() => setIsReviewOpen(true)}
+                     className="w-full py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-sm font-bold hover:bg-emerald-100 flex items-center justify-center"
+                   >
+                     <ListPlus size={16} className="mr-2"/> Open Staging Review
+                   </button>
+                </div>
+              </div>
+
+              {/* MANUAL INSPECT */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 flex flex-col">
+                <h3 className="font-bold text-slate-800 mb-2 flex items-center text-sm"><Search size={16} className="mr-2"/> Manual Site Inspector</h3>
+                <div className="flex space-x-2">
+                    <input 
+                        type="text" 
+                        value={manualUrl}
+                        onChange={(e) => setManualUrl(e.target.value)}
+                        placeholder="Enter specific URL..."
+                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        onKeyDown={(e) => e.key === 'Enter' && runManualCrawl()}
+                    />
+                    <button 
+                        onClick={runManualCrawl}
+                        disabled={isCrawling || !manualUrl}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                        Inspect
+                    </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2 flex items-center"><Sparkles size={10} className="mr-1"/> Includes AI Content Extraction</p>
+              </div>
            </div>
         </div>
-        
-        {/* DISCOVERY RESULTS (Appears after crawl) */}
-        {discoveryResults.length > 0 && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm animate-in fade-in slide-in-from-bottom-4">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center"><Activity size={18} className="mr-2"/> Discovery Results</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-               {['TRUSTED', 'PENDING', 'REJECTED'].map(status => (
-                 <div key={status} className={`border rounded-lg p-4 ${status === 'TRUSTED' ? 'bg-emerald-50 border-emerald-100' : status === 'PENDING' ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100'}`}>
-                    <h4 className={`font-bold text-sm mb-3 ${status === 'TRUSTED' ? 'text-emerald-800' : status === 'PENDING' ? 'text-amber-800' : 'text-red-800'}`}>{status} SOURCES</h4>
-                    <div className="space-y-2">
-                       {discoveryResults.filter(r => r.status === status).map((r, i) => (
-                         <div key={i} className="bg-white p-2 rounded shadow-sm text-xs border border-slate-100">
-                            <div className="font-medium truncate">{r.url}</div>
-                            <div className="flex justify-between mt-1 text-[10px] text-slate-400">
-                               <span>Score: {r.score}</span>
-                               {r.reason && <span className="text-red-500">{r.reason}</span>}
-                            </div>
-                         </div>
-                       ))}
-                       {discoveryResults.filter(r => r.status === status).length === 0 && <div className="text-xs text-slate-400 italic">No items found.</div>}
-                    </div>
-                 </div>
-               ))}
-            </div>
-          </div>
-        )}
 
         {/* QUERY BUILDER */}
         <div className="bg-white p-6 rounded-xl border border-slate-200">
@@ -1825,31 +1029,527 @@ const CrawlerConfig = () => {
         {/* Modals */}
         <AddSourceModal isOpen={isAddSourceOpen} onClose={() => setIsAddSourceOpen(false)} onAdd={(url) => setSources(prev => [...prev, url])} />
         <AdvancedQueryBuilderModal isOpen={isQueryBuilderOpen} onClose={() => setIsQueryBuilderOpen(false)} englishQuery={englishQuery} arabicQuery={arabicQuery} />
+        <StagingReviewModal isOpen={isReviewOpen} onClose={() => setIsReviewOpen(false)} />
       </div>
     );
 };
 
-// 10. MAIN APP ROUTING
+const Dashboard = () => {
+  const { projects } = useProjects();
+  const { t, lang } = useLanguage();
+
+  const totalValue = projects.reduce((sum, p) => sum + (p.estimatedValueSAR || 0), 0);
+  const pipelineValue = projects.reduce((sum, p) => sum + (p.expectedKLScopeValue || 0), 0);
+  
+  const statusData = [
+    { name: 'Ongoing', value: projects.filter(p => p.status === ProjectStatus.ONGOING).length, color: '#10B981' },
+    { name: 'Tender', value: projects.filter(p => p.status === ProjectStatus.TENDER).length, color: '#F59E0B' },
+    { name: 'Awarded', value: projects.filter(p => p.status === ProjectStatus.AWARDED).length, color: '#3B82F6' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-slate-900">{t('dashboard')}</h1>
+        <button onClick={() => DOWNLOAD_DASHBOARD_REPORT()} className="flex items-center px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50">
+          <Download size={16} className="mr-2" /> {t('downloadReport')}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex justify-between items-start mb-4">
+            <div className="p-2 bg-blue-50 rounded-lg"><Building2 className="text-blue-600" size={24} /></div>
+            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">+2 this week</span>
+          </div>
+          <div className="text-3xl font-bold text-slate-900 mb-1">{projects.length}</div>
+          <div className="text-sm text-slate-500">{t('totalProjects')}</div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex justify-between items-start mb-4">
+            <div className="p-2 bg-emerald-50 rounded-lg"><Zap className="text-emerald-600" size={24} /></div>
+            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">High Conf.</span>
+          </div>
+          <div className="text-3xl font-bold text-slate-900 mb-1">{FORMAT_CURRENCY(pipelineValue, lang)}</div>
+          <div className="text-sm text-slate-500">{t('activePipeline')}</div>
+        </div>
+        
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex justify-between items-start mb-4">
+             <div className="p-2 bg-amber-50 rounded-lg"><Clock className="text-amber-600" size={24} /></div>
+          </div>
+           <div className="text-3xl font-bold text-slate-900 mb-1">{projects.filter(p => p.status === ProjectStatus.TENDER).length}</div>
+           <div className="text-sm text-slate-500">Active Tenders</div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+           <div className="flex justify-between items-start mb-4">
+              <div className="p-2 bg-purple-50 rounded-lg"><Activity className="text-purple-600" size={24} /></div>
+           </div>
+           <div className="text-3xl font-bold text-slate-900 mb-1">{projects.filter(p => p.status === ProjectStatus.ONGOING).length}</div>
+           <div className="text-sm text-slate-500">Projects Ongoing</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-6">Project Status Distribution</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                  {statusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex justify-center gap-4 mt-4">
+            {statusData.map((item, i) => (
+              <div key={i} className="flex items-center text-xs">
+                <span className="w-3 h-3 rounded-full mr-1" style={{ backgroundColor: item.color }}></span>
+                {item.name}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+           <h3 className="font-bold text-slate-800 mb-4">Latest Market Intelligence</h3>
+           <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+             {projects.slice(0, 3).map(p => (
+               p.news.map(n => (
+                 <div key={n.id} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-xs font-bold text-blue-600">{n.source}</span>
+                      <span className="text-[10px] text-slate-400">{n.date}</span>
+                    </div>
+                    <p className="text-sm font-medium text-slate-800 mb-1 line-clamp-2">{n.title}</p>
+                    <p className="text-xs text-slate-500 line-clamp-2">{n.snippet}</p>
+                 </div>
+               ))
+             ))}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProjectsList = () => {
+  const { projects } = useProjects();
+  const { t, lang } = useLanguage();
+  const [filter, setFilter] = useState('');
+
+  const filtered = projects.filter(p => 
+    p.name.toLowerCase().includes(filter.toLowerCase()) || 
+    p.developer.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-slate-900">{t('projects')}</h1>
+        <div className="flex space-x-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="Search projects..." 
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ksa-green/20"
+            />
+          </div>
+          <button className="flex items-center px-4 py-2 bg-ksa-green text-white rounded-lg text-sm font-bold hover:bg-green-800">
+             <Plus size={16} className="mr-2" /> Add Project
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-bold">
+            <tr>
+              <th className="px-6 py-4">{t('projectDetails')}</th>
+              <th className="px-6 py-4">{t('type')}</th>
+              <th className="px-6 py-4">{t('city')}</th>
+              <th className="px-6 py-4">{t('status')}</th>
+              <th className="px-6 py-4">{t('value')}</th>
+              <th className="px-6 py-4">KL Scope</th>
+              <th className="px-6 py-4"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.map(project => (
+              <tr key={project.id} className="hover:bg-slate-50 transition-colors">
+                <td className="px-6 py-4">
+                  <div className="font-bold text-slate-800">{lang === 'ar' ? project.name_ar || project.name : project.name}</div>
+                  <div className="text-xs text-slate-500">{project.developer}</div>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="px-2 py-1 bg-slate-100 rounded text-xs text-slate-600">{project.type}</span>
+                </td>
+                <td className="px-6 py-4 text-slate-600">{project.city}</td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-1 rounded text-xs font-bold ${
+                    project.status === ProjectStatus.ONGOING ? 'bg-emerald-100 text-emerald-700' :
+                    project.status === ProjectStatus.TENDER ? 'bg-amber-100 text-amber-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {project.status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-slate-700 font-mono">
+                  {FORMAT_CURRENCY(project.estimatedValueSAR, lang)}
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex space-x-1">
+                    {project.kitchenScope && <span className="w-2 h-2 rounded-full bg-orange-400" title="Kitchen"></span>}
+                    {project.laundryScope && <span className="w-2 h-2 rounded-full bg-blue-400" title="Laundry"></span>}
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-right">
+                   <Link to={`/projects/${project.id}`} className="text-blue-600 hover:text-blue-800 font-medium text-xs">View</Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const ProjectDetail = () => {
+  const { id } = useParams();
+  const { projects } = useProjects();
+  const project = projects.find(p => p.id === id);
+  const navigate = useNavigate();
+
+  if (!project) return <div>Project not found</div>;
+
+  return (
+    <div className="space-y-6">
+       <button onClick={() => navigate(-1)} className="flex items-center text-slate-500 hover:text-slate-800 text-sm">
+         <ArrowLeft size={16} className="mr-1" /> Back to Projects
+       </button>
+       
+       <div className="flex justify-between items-start">
+         <div>
+           <h1 className="text-2xl font-bold text-slate-900 mb-2">{project.name}</h1>
+           <div className="flex space-x-2">
+             <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded border border-slate-200">{project.type}</span>
+             <span className="px-2 py-1 bg-blue-50 text-blue-600 text-xs rounded border border-blue-100">{project.city}</span>
+           </div>
+         </div>
+         <div className="flex space-x-3">
+            <button onClick={() => DOWNLOAD_PDF(project)} className="flex items-center px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50">
+               <Download size={16} className="mr-2"/> Export PDF
+            </button>
+            <button className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700">
+               <Edit2 size={16} className="mr-2"/> Edit Project
+            </button>
+         </div>
+       </div>
+
+       <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2 space-y-6">
+             <div className="bg-white p-6 rounded-xl border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">Project Overview</h3>
+                <p className="text-slate-600 text-sm leading-relaxed mb-4">{project.description}</p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                   <div>
+                      <span className="block text-slate-400 text-xs">Developer</span>
+                      <span className="font-medium text-slate-800">{project.developer}</span>
+                   </div>
+                   <div>
+                      <span className="block text-slate-400 text-xs">Contractor</span>
+                      <span className="font-medium text-slate-800">{project.contractor || 'TBD'}</span>
+                   </div>
+                   <div>
+                      <span className="block text-slate-400 text-xs">Consultant</span>
+                      <span className="font-medium text-slate-800">{project.consultant || 'TBD'}</span>
+                   </div>
+                   <div>
+                      <span className="block text-slate-400 text-xs">Completion</span>
+                      <span className="font-medium text-slate-800">{project.expectedCompletion}</span>
+                   </div>
+                </div>
+             </div>
+
+             <div className="bg-white p-6 rounded-xl border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">Technical Scope (K&L)</h3>
+                <div className="flex space-x-6 mb-4">
+                   <div className={`flex-1 p-4 rounded-lg border ${project.kitchenScope ? 'border-orange-200 bg-orange-50' : 'border-slate-100 bg-slate-50 opacity-50'}`}>
+                      <div className="flex items-center mb-2">
+                        <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center mr-2"><LayoutDashboard size={16} className="text-orange-600"/></div>
+                        <span className="font-bold text-orange-900">Food Service</span>
+                      </div>
+                      <p className="text-xs text-slate-600">Full central production unit and satellite kitchens required.</p>
+                   </div>
+                   <div className={`flex-1 p-4 rounded-lg border ${project.laundryScope ? 'border-blue-200 bg-blue-50' : 'border-slate-100 bg-slate-50 opacity-50'}`}>
+                      <div className="flex items-center mb-2">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center mr-2"><Sparkles size={16} className="text-blue-600"/></div>
+                        <span className="font-bold text-blue-900">Laundry</span>
+                      </div>
+                      <p className="text-xs text-slate-600">On-premise laundry facility for 500+ keys.</p>
+                   </div>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 flex justify-between items-center">
+                   <div>
+                      <span className="block text-xs text-slate-500">Estimated Package Value</span>
+                      <span className="text-xl font-bold text-emerald-600">{FORMAT_CURRENCY(project.expectedKLScopeValue || 0)}</span>
+                   </div>
+                   <div className="text-right">
+                      <span className="block text-xs text-slate-500">Sales Probability</span>
+                      <span className="text-lg font-bold text-slate-800">{project.salesData?.probability}%</span>
+                   </div>
+                </div>
+             </div>
+          </div>
+
+          <div className="space-y-6">
+             <div className="bg-white p-6 rounded-xl border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-4">Attachments</h3>
+                <div className="space-y-3">
+                   {project.attachments?.map(att => (
+                     <div key={att.id} className="flex items-center p-3 bg-slate-50 rounded border border-slate-100 hover:bg-slate-100 cursor-pointer">
+                        <FileText size={20} className="text-slate-400 mr-3"/>
+                        <div className="flex-1 overflow-hidden">
+                           <div className="text-sm font-medium text-slate-700 truncate">{att.name}</div>
+                           <div className="text-xs text-slate-400">{att.size} • {att.type}</div>
+                        </div>
+                        <Download size={14} className="text-slate-400"/>
+                     </div>
+                   ))}
+                   {(!project.attachments || project.attachments.length === 0) && <div className="text-sm text-slate-400 italic">No files attached</div>}
+                </div>
+             </div>
+             
+             <div className="bg-white p-6 rounded-xl border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-4">Intelligence Feed</h3>
+                <div className="space-y-4">
+                   {project.news.map(n => (
+                     <div key={n.id} className="relative pl-4 border-l-2 border-slate-200">
+                        <div className="text-[10px] text-slate-400 mb-1">{n.date} • {n.source}</div>
+                        <a href={n.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:underline block mb-1">{n.title}</a>
+                        <p className="text-xs text-slate-500 line-clamp-2">{n.snippet}</p>
+                     </div>
+                   ))}
+                </div>
+             </div>
+          </div>
+       </div>
+    </div>
+  );
+};
+
+const CompaniesList = () => {
+    return (
+        <div className="space-y-6">
+            <h1 className="text-2xl font-bold text-slate-900">Company Directory</h1>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {MOCK_COMPANIES.map(company => (
+                    <div key={company.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center space-x-4 mb-4">
+                            <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center font-bold text-slate-500 text-lg">
+                                {company.name.substring(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-800">{company.name}</h3>
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full">{company.type}</span>
+                            </div>
+                        </div>
+                        <div className="space-y-2 text-sm text-slate-600">
+                            <div className="flex items-center"><MapIcon size={14} className="mr-2 text-slate-400"/> {company.city}</div>
+                            {company.website && <div className="flex items-center"><Globe size={14} className="mr-2 text-slate-400"/> <a href={company.website} className="text-blue-600 hover:underline">Website</a></div>}
+                            {company.contactPerson && (
+                                <div className="mt-4 pt-4 border-t border-slate-100">
+                                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">Key Contact</p>
+                                    <p className="font-medium text-slate-800">{company.contactPerson.name}</p>
+                                    <p className="text-xs text-slate-500">{company.contactPerson.role}</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    )
+}
+
+const Pipeline = () => {
+  const { projects } = useProjects();
+  const stages = ['Review', 'Qualified', 'Proposal', 'Negotiation', 'Won']; // Simplified
+  // MOCK mapping for demo
+  const getStage = (p: Project) => {
+     if (p.salesData?.probability && p.salesData.probability >= 90) return 'Won';
+     if (p.salesData?.probability && p.salesData.probability >= 70) return 'Negotiation';
+     if (p.salesData?.probability && p.salesData.probability >= 40) return 'Proposal';
+     if (p.salesData?.probability && p.salesData.probability >= 20) return 'Qualified';
+     return 'Review';
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+        <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold text-slate-900">Sales Pipeline</h1>
+        </div>
+        <div className="flex-1 overflow-x-auto">
+            <div className="flex h-full min-w-max space-x-4 pb-4">
+                {stages.map(stage => (
+                    <div key={stage} className="w-80 flex flex-col bg-slate-100 rounded-xl max-h-full">
+                        <div className="p-4 font-bold text-slate-700 border-b border-slate-200 flex justify-between items-center">
+                            {stage}
+                            <span className="text-xs bg-slate-200 px-2 py-1 rounded-full text-slate-600">
+                                {projects.filter(p => getStage(p) === stage).length}
+                            </span>
+                        </div>
+                        <div className="p-2 flex-1 overflow-y-auto space-y-2">
+                            {projects.filter(p => getStage(p) === stage).map(project => (
+                                <div key={project.id} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+                                    <div className="font-bold text-sm text-slate-800 mb-1">{project.name}</div>
+                                    <div className="text-xs text-slate-500 mb-2">{project.developer}</div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-xs font-bold text-emerald-600">{FORMAT_CURRENCY(project.expectedKLScopeValue || 0)}</span>
+                                        {project.salesData?.probability && (
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                                project.salesData.probability > 60 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                                            }`}>{project.salesData.probability}%</span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    </div>
+  )
+}
+
+const MapView = () => {
+    return (
+        <div className="h-full flex flex-col">
+            <h1 className="text-2xl font-bold text-slate-900 mb-4">Geospatial Project View</h1>
+            <div className="flex-1 bg-slate-200 rounded-xl overflow-hidden relative border border-slate-300 flex items-center justify-center">
+                 <div className="text-center">
+                    <MapIcon size={48} className="text-slate-400 mx-auto mb-2"/>
+                    <p className="text-slate-500 font-medium">Interactive Map Module</p>
+                    <p className="text-xs text-slate-400">Google Maps API / Mapbox Integration Placeholder</p>
+                 </div>
+                 {/* Simulate Pins */}
+                 <div className="absolute top-1/3 left-1/4 w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow-lg cursor-pointer" title="Riyadh Project"></div>
+                 <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg cursor-pointer" title="Jeddah Project"></div>
+                 <div className="absolute bottom-1/3 right-1/4 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white shadow-lg cursor-pointer" title="Dammam Project"></div>
+            </div>
+        </div>
+    )
+}
+
+const SettingsPage = () => {
+    return (
+        <div className="max-w-4xl mx-auto space-y-6">
+            <h1 className="text-2xl font-bold text-slate-900">System Settings</h1>
+            
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="font-bold text-slate-800 mb-4 flex items-center"><UserIcon size={18} className="mr-2"/> User Profile</h3>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                        <input type="text" className="w-full p-2 border border-slate-300 rounded" defaultValue="Admin User" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                        <input type="email" className="w-full p-2 border border-slate-300 rounded" defaultValue="admin@ksaintel.com" />
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="font-bold text-slate-800 mb-4 flex items-center"><Bell size={18} className="mr-2"/> Notifications</h3>
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-700">Email Alerts for New Projects</span>
+                        <input type="checkbox" defaultChecked className="toggle" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-700">Daily Digest Summary</span>
+                        <input type="checkbox" defaultChecked className="toggle" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+const AdminConsole = () => {
+    return (
+        <div className="space-y-6">
+            <h1 className="text-2xl font-bold text-slate-900 flex items-center text-red-600"><Shield size={24} className="mr-2"/> Admin Console</h1>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 className="font-bold text-slate-800 mb-4">User Management</h3>
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                            <tr>
+                                <th className="p-2">User</th>
+                                <th className="p-2">Role</th>
+                                <th className="p-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {MOCK_USERS.map(u => (
+                                <tr key={u.id} className="border-t border-slate-100">
+                                    <td className="p-2 font-medium">{u.name}</td>
+                                    <td className="p-2">{u.role}</td>
+                                    <td className="p-2 text-green-600">Active</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 className="font-bold text-slate-800 mb-4">System Audit Log</h3>
+                    <div className="space-y-2 text-xs font-mono max-h-48 overflow-y-auto">
+                        {MOCK_AUDIT_LOGS.map(log => (
+                            <div key={log.id} className="p-2 bg-slate-50 border border-slate-100 rounded">
+                                <span className="text-slate-400">[{log.timestamp}]</span> <span className="text-blue-600">{log.user}</span>: {log.action}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 const App = () => {
   return (
     <HashRouter>
       <AuthProvider>
         <LanguageProvider>
           <ProjectProvider>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/projects" element={<ProjectsList />} />
-                <Route path="/projects/:id" element={<ProjectDetail />} />
-                <Route path="/companies" element={<CompaniesList />} />
-                <Route path="/map" element={<MapView />} />
-                <Route path="/pipeline" element={<Pipeline />} />
-                <Route path="/crawler" element={<CrawlerConfig />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/admin" element={<AdminConsole />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Layout>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/" element={<Layout><Dashboard /></Layout>} />
+              <Route path="/projects" element={<Layout><ProjectsList /></Layout>} />
+              <Route path="/projects/:id" element={<Layout><ProjectDetail /></Layout>} />
+              <Route path="/companies" element={<Layout><CompaniesList /></Layout>} />
+              <Route path="/pipeline" element={<Layout><Pipeline /></Layout>} />
+              <Route path="/map" element={<Layout><MapView /></Layout>} />
+              <Route path="/crawler" element={<Layout><CrawlerConfig /></Layout>} />
+              <Route path="/settings" element={<Layout><SettingsPage /></Layout>} />
+              <Route path="/admin" element={<Layout><AdminConsole /></Layout>} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           </ProjectProvider>
         </LanguageProvider>
       </AuthProvider>
