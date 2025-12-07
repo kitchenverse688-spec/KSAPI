@@ -650,7 +650,7 @@ const ProjectsList = () => {
   const GanttView = () => {
     return (
       <div className="overflow-x-auto bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h3 className="font-bold text-lg mb-4">Project Timeline (Awarded -> Completion)</h3>
+        <h3 className="font-bold text-lg mb-4">Project Timeline (Awarded &gt; Completion) </h3>
         <div className="min-w-[800px] space-y-4">
           <div className="flex border-b border-slate-200 pb-2">
             <div className="w-64 font-medium text-slate-500 text-sm">Project</div>
