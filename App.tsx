@@ -1214,7 +1214,7 @@ const SettingsPage = () => {
            <div className="pt-4 border-t border-slate-100 space-y-3">
              <label className="flex items-center space-x-3">
                <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" defaultChecked />
-               <span className="text-sm text-slate-700">Alert on new High Value Projects (&gt;>100M SAR)</span>
+               <span className="text-sm text-slate-700"> Alert on new High Value Projects (&gt;100M SAR) </span>
              </label>
              <label className="flex items-center space-x-3">
                <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" defaultChecked />
