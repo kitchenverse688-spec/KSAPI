@@ -146,6 +146,11 @@ export interface Project {
 
 // --- CRAWLER & STAGING TYPES ---
 
+export interface ExtractedPerson {
+  name: string;
+  role: string;
+}
+
 export interface PotentialProject {
   id: string; // Temporary ID for staging
   projectName: string;
@@ -153,6 +158,7 @@ export interface PotentialProject {
   developer: string;
   consultant?: string;
   contractor?: string;
+  operator?: string;
   city: City;
   region: string;
   sourceUrl: string;
@@ -161,10 +167,13 @@ export interface PotentialProject {
   summary: string;
   status: ProjectStatus;
   estimatedOpening?: string;
+  expectedOpening?: string;
   estimatedValue?: number;
   classification: 'New' | 'Backlog' | 'Review';
   isDuplicate?: boolean;
   existingProjectId?: string; // If duplicate, link to real DB ID
+  kitchenNotes?: string;
+  extractedPeople?: ExtractedPerson[];
 }
 
 export interface KPIStats {

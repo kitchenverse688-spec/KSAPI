@@ -7,6 +7,7 @@ import { Dashboard, MapView } from './Dashboard';
 import { ProjectsList, ProjectDetail } from './Projects';
 import { CompaniesList, Pipeline } from './CRM';
 import { CrawlerConfig } from './CrawlerConfig';
+import { ManualCrawler } from './ManualCrawler';
 import { AdminConsole, SettingsPage } from './Admin';
 
 const App = () => {
@@ -24,6 +25,7 @@ const App = () => {
               <Route path="/pipeline" element={<Layout><Pipeline /></Layout>} />
               <Route path="/map" element={<Layout><MapView /></Layout>} />
               <Route path="/crawler" element={<Layout><CrawlerConfig /></Layout>} />
+              <Route path="/manual-crawler" element={<Layout><ManualCrawler /></Layout>} />
               <Route path="/settings" element={<Layout><SettingsPage /></Layout>} />
               <Route path="/admin" element={<Layout><AdminConsole /></Layout>} />
               <Route path="*" element={<Navigate to="/" replace />} />
